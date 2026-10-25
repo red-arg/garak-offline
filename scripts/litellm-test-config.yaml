@@ -1,0 +1,10 @@
+# LiteLLM proxy config for the isolation test: one model routed to a mock vLLM backend.
+model_list:
+  - model_name: my-model
+    litellm_params:
+      model: hosted_vllm/mock-model
+      api_base: http://garak-test-mock-vllm:8000/v1
+      api_key: vllm-key
+
+general_settings:
+  master_key: sk-litellm-test

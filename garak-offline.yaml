@@ -1,0 +1,29 @@
+---
+# garak 0.17.1 - default probe set, run fully offline against a vLLM model behind LiteLLM.
+# Run with:  source garak-env.sh && garak --config garak-offline.yaml
+
+run:
+  generations: 5            # garak default; responses requested per prompt
+
+# garak sends one request at a time by default. To run attempts in parallel, uncomment
+# both lines (size it to what your vLLM / LiteLLM rate limits allow). Don't leave
+# "system:" uncommented on its own - garak 0.17.1 fails on an empty section.
+# system:
+#   parallel_attempts: 16
+
+plugins:
+  target_type: openai.OpenAICompatible
+  target_name: my-model     # the model name exactly as LiteLLM exposes it (GET /v1/models)
+  generators:
+    openai:
+      OpenAICompatible:
+        uri: https://litellm.internal.example.com/v1
+        # The API key is read from the OPENAICOMPATIBLE_API_KEY environment variable.
+        # If LiteLLM rejects the "n" parameter, uncomment:
+        # suppressed_params: ["n"]
+  detectors:
+    unsafe_content:
+      ToxicCommentModel:
+        # Pickle-free replacement for garak's default toxicity classifier
+        # (default garak-llm/roberta_toxicity_classifier ships only pytorch_model.bin).
+        detector_model_path: garak-llm/toxic-comment-model
