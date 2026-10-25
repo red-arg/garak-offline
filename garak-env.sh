@@ -6,6 +6,7 @@ export GARAK_HOME=${GARAK_HOME:-/opt/garak}
 export HF_HOME=$GARAK_HOME/cache/huggingface    # detector/attacker models + datasets
 export XDG_CACHE_HOME=$GARAK_HOME/cache          # garak cache: NLTK data, WordNet DB
 export XDG_DATA_HOME=$GARAK_HOME/data            # garak reports: $XDG_DATA_HOME/garak/garak_runs
+export TIKTOKEN_CACHE_DIR=$GARAK_HOME/cache/tiktoken  # cl100k_base encoding for divergence.RepeatedToken
 
 # Never try the network for models/datasets; fail fast instead of waiting on timeouts
 export HF_HUB_OFFLINE=1

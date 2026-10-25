@@ -19,6 +19,7 @@ python3.12 -m venv /tmp/venv
 
 export HOME=/root
 export HF_HOME=$B/cache/huggingface XDG_CACHE_HOME=$B/cache XDG_DATA_HOME=/out/harvest-data
+export TIKTOKEN_CACHE_DIR=$B/cache/tiktoken
 export HF_HUB_DISABLE_TELEMETRY=1 LITELLM_LOCAL_MODEL_COST_MAP=True
 export OPENAICOMPATIBLE_API_KEY=harvest-key
 mkdir -p "$HOME"

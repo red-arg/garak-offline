@@ -98,6 +98,7 @@ if ds_cache.exists():
 
 wn_md, wn_size = dir_table(cache / "garak" / "data" / "wn", "WordNet database")
 nltk_md, nltk_size = dir_table(cache / "garak" / "data" / "nltk_data", "NLTK data")
+tiktoken_md, tiktoken_size = dir_table(cache / "tiktoken", "tiktoken encoding")
 
 out = tpl
 for marker, value in {
@@ -113,8 +114,8 @@ for marker, value in {
     "WN_SIZE": human(wn_size) if wn_size else "pending",
     "NLTK_FILES": nltk_md,
     "NLTK_SIZE": human(nltk_size) if nltk_size else "pending",
-    "PICKLE": ((root / "scripts" / "pickle.md").read_text().strip()
-               if (root / "scripts" / "pickle.md").exists() else "_Pending the isolated test._"),
+    "TIKTOKEN_FILES": tiktoken_md,
+    "TIKTOKEN_SIZE": human(tiktoken_size) if tiktoken_size else "pending",
     "CFG_YAML": (root / "garak-offline.yaml").read_text().strip(),
     "CFG_ENV": (root / "garak-env.sh").read_text().strip(),
 }.items():

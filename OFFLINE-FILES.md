@@ -4,11 +4,13 @@ Everything needed to run **garak 0.17.1** with its **default probe setup** on an
 **RHEL 9 / x86_64 / Python 3.12** host with **no network egress**. The model under test is
 served by **vLLM behind LiteLLM** inside the isolated network, so its weights are *not* part of this bundle.
 
-> **Status (2026-10-25)**
-> - **Python packages: not bundled.** Installed from the internal package repository.
-> - **Models: collected.** All 4 Hugging Face models were downloaded by garak itself during the staging run (rows marked *collected*).
-> - **Datasets, WordNet, NLTK: collection run in progress.** Rows marked *pending* come from garak's source and plugin metadata and will be confirmed when the run reaches those probes.
-> - **End-to-end isolated test: not run yet.** This is a run on a network with no internet route, through a real LiteLLM proxy. This document will be regenerated once it passes.
+> **Status (2026-10-25): isolated test passed.**
+> - **Setup:** a RHEL 9.8 (UBI 9) x86_64 container on a Docker network with no internet route. garak called a real LiteLLM proxy (API-key auth), which forwarded to a mock vLLM backend.
+> - **All 93 default probes ran offline.** 92 ran in the full run (31 min, 1 generation per prompt, exit 0). `divergence.RepeatedToken` ran in a follow-up run after its tiktoken file was added (section 6).
+> - **Network:** the only access attempt in the full run was tiktoken's, now fixed. The Perspective API detectors are skipped as expected.
+> - **Pickle:** an audit hook recorded no pickle-type file opened and no pickle class loaded in either run.
+> - **Bundle:** `SHA256SUMS` was verified inside the isolated container. Every model and data file was downloaded by garak itself during the staging run.
+> - **Python packages:** the test installed the 178 hash-pinned packages from `requirements.txt` as local wheels, standing in for the internal package repository.
 
 ## Summary
 
@@ -16,14 +18,16 @@ served by **vLLM behind LiteLLM** inside the isolated network, so its weights ar
 |---|---|---|---|---|
 | 1 | Python packages | `garak==0.17.1` from the internal package repository, CPU-only torch | not bundled | installed into a venv |
 | 2 | Hugging Face models | 4 small classifier / attacker models, all safetensors | 2.3 GB | `$HF_HOME/hub/` |
-| 3 | Hugging Face datasets | 9 small datasets (package lists, system prompts) | 192.4 MB | `$HF_HOME/hub/` (+ `$HF_HOME/datasets/`) |
-| 4 | WordNet (Open English WordNet 2023) | 1 lexicon, loaded into a local database | pending | `$XDG_CACHE_HOME/garak/data/wn/` |
-| 5 | NLTK data | `averaged_perceptron_tagger_eng` (JSON, not pickle) | pending | `$XDG_CACHE_HOME/garak/data/nltk_data/` |
-| 6 | Config (this folder) | `garak-offline.yaml`, `garak-env.sh`, `requirements.in` | small | anywhere, e.g. `/opt/garak/` |
+| 3 | Hugging Face datasets | 9 small datasets (package lists, system prompts) | 406.1 MB | `$HF_HOME/hub/` (+ `$HF_HOME/datasets/`) |
+| 4 | WordNet (Open English WordNet 2023) | 1 lexicon, loaded into a local database | 107.0 MB | `$XDG_CACHE_HOME/garak/data/wn/` |
+| 5 | NLTK data | `averaged_perceptron_tagger_eng` (JSON, not pickle) | 6.9 MB | `$XDG_CACHE_HOME/garak/data/nltk_data/` |
+| 6 | tiktoken encoding | `cl100k_base` (plain text) | 1.6 MB | `$TIKTOKEN_CACHE_DIR` (`$GARAK_HOME/cache/tiktoken/`) |
+| 7 | Config (this folder) | `garak-offline.yaml`, `garak-env.sh`, `requirements.in`, `requirements.txt` | small | anywhere, e.g. `/opt/garak/` |
 
-No file in the bundle is in pickle format. The only pickle model garak would normally use
-(`garak-llm/roberta_toxicity_classifier`, `pytorch_model.bin`) is replaced by
-`garak-llm/toxic-comment-model` (safetensors) through `garak-offline.yaml`.
+No model or data file in the bundle is in pickle format. The only pickle model garak would
+normally use (`garak-llm/roberta_toxicity_classifier`, `pytorch_model.bin`) is replaced by
+`garak-llm/toxic-comment-model` (safetensors) through `garak-offline.yaml`. Some Python packages
+carry pickle files they never load; see [Pickle check](#pickle-check).
 
 ---
 
@@ -38,6 +42,20 @@ python3.12 -m venv /opt/garak/venv
 
 For the CPU-only torch build, add `--extra-index-url` pointing at the internal mirror of
 `https://download.pytorch.org/whl/cpu`.
+
+**Recommended: install the lock file instead.** `requirements.txt` pins all 178 packages with
+hashes, including `torch==2.14.1+cpu`. It is exactly the set that passed the isolated test.
+With only `requirements.in`, pip picks the newest versions of garak's dependencies on the day you
+install. If PyPI has a newer torch than the CPU index, pip also picks the CUDA build from PyPI,
+because `--extra-index-url` takes the highest version from any index.
+
+```bash
+/opt/garak/venv/bin/pip install --require-hashes -r requirements.txt \
+  --index-url <internal PyPI mirror> --extra-index-url <internal mirror of download.pytorch.org/whl/cpu>
+```
+
+Two packages, `ecoji==0.1.1` and `langdetect==1.0.9`, are published only as source archives.
+pip builds them during install, which needs `setuptools` from the same repository.
 
 ---
 
@@ -56,15 +74,17 @@ All are loaded on CPU by the `transformers` library. Download each at the pinned
 
 | Repo | Revision | Used by | Files | Size | Status |
 |---|---|---|---|---|---|
-| `garak-llm/pypi-20241031` | `d0cb6954a12ebe3e383e9946ab2685efa23130fa` | `packagehallucination.Python` | `pypi-20241031.tsv` (21.8 MB) | 21.8 MB | pending |
-| `garak-llm/npm-20241031` | `98e02cd0a2d568a8b36300431aefba21550a9d34` | `packagehallucination.JavaScript` | `npm-20241031.tsv` (151.4 MB) | 151.4 MB | pending |
-| `garak-llm/rubygems-20241031` | `51ab0238f9c16b5c31ecfdf935da9fd5abf74647` | `packagehallucination.Ruby` | `rubygems-20241031.tsv` (6.9 MB) | 6.9 MB | pending |
-| `garak-llm/crates-20250307` | `36751f99fd6652a029c8b26ddd2ffcf745f4d999` | `packagehallucination.Rust` | `crates-20250307.tsv` (5.6 MB) | 5.6 MB | pending |
-| `garak-llm/raku-20250811` | `e2b0b34ad3cb30e6c62076f4cfeb605c94f3a809` | `packagehallucination.RakuLand` | `raku_packages_dataset.jsonl` (56.2 KB) | 56.2 KB | pending |
-| `garak-llm/perl-20250811` | `2b41fd08111f283b03d00544121ba438c769db22` | `packagehallucination.Perl` | `create_dataset.py` (1.7 KB)<br>`perl_modules_dataset.jsonl` (2.1 MB) | 2.2 MB | pending |
-| `garak-llm/dart-20250811` | `f50076de413a4f660d65b398096fae750b35d53b` | `packagehallucination.Dart` | `create_dataset.py` (1.2 KB)<br>`dart_output.log` (1.1 MB)<br>`dart_packages_dataset.jsonl` (1.8 MB) | 2.9 MB | pending |
-| `garak-llm/drh-System-Prompt-processed` | `26bb2b284b0380268bc74fe51b1c5eeaccb02242` | `sysprompt_extraction.SystemPromptExtraction` | `drh.json` (1.4 MB) | 1.4 MB | pending |
-| `garak-llm/tm-system_prompt` | `005c0854fe0c95e6a56ed45e3ff1e755cf007394` | `sysprompt_extraction.SystemPromptExtraction` | `final_system_prompts_69.jsonl` (15.2 KB) | 15.2 KB | pending |
+| `garak-llm/pypi-20241031` | `d0cb6954a12ebe3e383e9946ab2685efa23130fa` | `packagehallucination.Python` | `README.md` (31 B)<br>`pypi-20241031.tsv` (21.8 MB) | 21.8 MB | collected |
+| `garak-llm/npm-20241031` | `98e02cd0a2d568a8b36300431aefba21550a9d34` | `packagehallucination.JavaScript` | `README.md` (31 B)<br>`npm-20241031.tsv` (151.4 MB) | 151.4 MB | collected |
+| `garak-llm/rubygems-20241031` | `51ab0238f9c16b5c31ecfdf935da9fd5abf74647` | `packagehallucination.Ruby` | `README.md` (31 B)<br>`rubygems-20241031.tsv` (6.9 MB) | 6.9 MB | collected |
+| `garak-llm/crates-20250307` | `36751f99fd6652a029c8b26ddd2ffcf745f4d999` | `packagehallucination.Rust` | `crates-20250307.tsv` (5.6 MB) | 5.6 MB | collected |
+| `garak-llm/raku-20250811` | `e2b0b34ad3cb30e6c62076f4cfeb605c94f3a809` | `packagehallucination.RakuLand` | `README.md` (31 B)<br>`raku_packages_dataset.jsonl` (56.2 KB) | 56.3 KB | collected |
+| `garak-llm/perl-20250811` | `2b41fd08111f283b03d00544121ba438c769db22` | `packagehallucination.Perl` | `README.md` (31 B)<br>`perl_modules_dataset.jsonl` (2.1 MB) | 2.1 MB | collected |
+| `garak-llm/dart-20250811` | `f50076de413a4f660d65b398096fae750b35d53b` | `packagehallucination.Dart` | `README.md` (31 B)<br>`dart_packages_dataset.jsonl` (1.8 MB) | 1.8 MB | collected |
+| `garak-llm/drh-System-Prompt-processed` | `26bb2b284b0380268bc74fe51b1c5eeaccb02242` | `sysprompt_extraction.SystemPromptExtraction` | `README.md` (31 B)<br>`drh.json` (1.4 MB) | 1.4 MB | collected |
+| `garak-llm/tm-system_prompt` | `005c0854fe0c95e6a56ed45e3ff1e755cf007394` | `sysprompt_extraction.SystemPromptExtraction` | `README.md` (27 B)<br>`final_system_prompts_69.jsonl` (15.2 KB) | 15.2 KB | collected |
+
+Plus the processed copies `datasets` writes to `cache/huggingface/datasets/` (18 files, 214.9 MB).
 
 **How to download 2 and 3:** the reliable way is to run garak once on a staging host with the
 same config against a stand-in endpoint, so every probe and detector downloads exactly the files it
@@ -83,17 +103,48 @@ Used by `topic.WordnetControversial` through the `wn` package (not NLTK).
 |---|---|
 | `https://en-word.net/static/english-wordnet-2023.xml.gz` (mirror: `https://github.com/globalwordnet/english-wordnet/releases/download/2023-edition/english-wordnet-2023.xml.gz`) | Loaded into `cache/garak/data/wn/` (SQLite database). Ship the built directory; the XML isn't needed afterwards. |
 
-_WordNet database: pending, collected when the staging run reaches this probe._
+| File | Size |
+|---|---|
+| `garak/data/wn/wn.db` | 107.0 MB |
 
 ## 5. NLTK data
 
 Used by `sata.MLM`. NLTK 3.10 loads this tagger from JSON files, not pickle.
 
+NLTK 3.10 only reads and writes data in a directory that is not group- or world-writable,
+including every parent directory. On the staging host, download it as a user whose home
+directory is private (for example root), not into `/tmp` or a bind mount, then copy it into the bundle.
+
 | Package | Source | Goes to |
 |---|---|---|
 | `averaged_perceptron_tagger_eng` | `https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/taggers/averaged_perceptron_tagger_eng.zip` | `cache/garak/data/nltk_data/taggers/` |
 
-_NLTK data: pending, collected when the staging run reaches this probe._
+| File | Size |
+|---|---|
+| `garak/data/nltk_data/taggers/averaged_perceptron_tagger_eng/averaged_perceptron_tagger_eng.classes.json` | 285 B |
+| `garak/data/nltk_data/taggers/averaged_perceptron_tagger_eng/averaged_perceptron_tagger_eng.tagdict.json` | 25.2 KB |
+| `garak/data/nltk_data/taggers/averaged_perceptron_tagger_eng/averaged_perceptron_tagger_eng.weights.json` | 5.4 MB |
+| `garak/data/nltk_data/taggers/averaged_perceptron_tagger_eng.zip` | 1.5 MB |
+
+## 6. tiktoken encoding: `cl100k_base`
+
+Used by `divergence.RepeatedToken` through OpenAI's `tiktoken` library. Without it, tiktoken tries
+to download the file at load time, the probe fails to load, and the rest of the run continues
+without it. That was the only network access attempt in the isolated test.
+
+| Source | Goes to |
+|---|---|
+| `https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken` (SHA-256 `223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7`) | `cache/tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4`. The filename is the SHA-1 of the URL; tiktoken looks it up in `$TIKTOKEN_CACHE_DIR`, which `garak-env.sh` sets, and checks the SHA-256 before use. |
+
+```bash
+mkdir -p bundle/cache/tiktoken
+curl -fL -o bundle/cache/tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4 \
+  https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken
+```
+
+| File | Size |
+|---|---|
+| `tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4` | 1.6 MB |
 
 ---
 
@@ -118,11 +169,13 @@ garak-bundle/
 ├── cache/
 │   ├── huggingface/hub/        # sections 2 and 3
 │   ├── huggingface/datasets/   # processed datasets (section 3)
+│   ├── tiktoken/               # section 6
 │   └── garak/data/
 │       ├── nltk_data/          # section 5
 │       └── wn/                 # section 4
 ├── garak-offline.yaml
 ├── garak-env.sh
+├── MANIFEST.md                 # generated file list with real names and sizes
 └── SHA256SUMS                  # checksum of every file above
 ```
 
@@ -135,7 +188,42 @@ source garak-env.sh
 /opt/garak/venv/bin/garak --config garak-offline.yaml
 ```
 
-Transfer it as a `tar` archive: the Hugging Face cache uses symlinks, which `tar` preserves.
+Requirements on the isolated host:
+
+- **Transfer as a `tar` archive.** The Hugging Face cache uses symlinks, which `tar` preserves.
+- **The garak directory must not be group- or world-writable**, nor any of its parents
+  (`chmod -R go-w /opt/garak`). NLTK 3.10 refuses to load data otherwise, and `sata.MLM` then
+  fails to load. A root-owned `/opt/garak` with mode 755 is fine. Don't put it under `/tmp`, or
+  under `/opt/app-root` in Red Hat UBI container images, which is group-writable.
+- **No `HF_TOKEN` and no internet access are needed.** `garak-env.sh` puts the Hugging Face
+  libraries in offline mode.
+
+---
+
+## Pickle check
+
+**Bundle data: no pickle.** Every file under `cache/` was checked by content (pickle header, and
+pickle entries inside zip files), not only by name. The models are safetensors, the datasets are
+TSV, JSON(L) and Arrow, the NLTK tagger is JSON, WordNet is SQLite, and the tiktoken file is text.
+
+**At runtime: nothing pickle-related is loaded.** During both isolated runs, a Python audit hook
+logged every file opened with a pickle-type extension (`.pkl .pickle .pt .pth .bin .ckpt .joblib
+.npy .npz`) and every class the `pickle` module looked up. Both logs are empty.
+
+**Inside the Python packages: pickle files are present but never loaded.** A few packages from the
+package repository ship pickle files:
+
+| Package | Files | Loaded in a default run? |
+|---|---|---|
+| `garak` 0.17.1 | `garak/data/confidence_intervals/confidence_intervals.pkl` | No. No code in 0.17.1 reads it. |
+| `garak` 0.17.1 | `garak/data/autodan/prompt_group.pth` | No. Only the live `dan.AutoDAN` attack loads it, and that probe isn't in the default set (the default uses `dan.AutoDANCached`). |
+| `joblib` 1.6.0 | 30 files under `joblib/test/data/` | No (test fixtures) |
+| `numpy` 2.5.4 | 8 files under `numpy/*/tests/data/` | No (test fixtures) |
+| `torch` 2.14.1+cpu | `torch/bin/test_interpreter_async.pt` | No (test fixture) |
+
+`setuptools`' `distutils-precedence.pth` matches by extension but is a Python path file, not a pickle.
+If policy forbids pickle files on disk at all, delete these files from the venv after installing.
+The default probe set doesn't need them.
 
 ---
 
@@ -188,6 +276,7 @@ export GARAK_HOME=${GARAK_HOME:-/opt/garak}
 export HF_HOME=$GARAK_HOME/cache/huggingface    # detector/attacker models + datasets
 export XDG_CACHE_HOME=$GARAK_HOME/cache          # garak cache: NLTK data, WordNet DB
 export XDG_DATA_HOME=$GARAK_HOME/data            # garak reports: $XDG_DATA_HOME/garak/garak_runs
+export TIKTOKEN_CACHE_DIR=$GARAK_HOME/cache/tiktoken  # cl100k_base encoding for divergence.RepeatedToken
 
 # Never try the network for models/datasets; fail fast instead of waiting on timeouts
 export HF_HUB_OFFLINE=1
@@ -213,17 +302,35 @@ export OPENAICOMPATIBLE_API_KEY=${OPENAICOMPATIBLE_API_KEY:?set OPENAICOMPATIBLE
 
 ## Producing the bundle
 
-`scripts/container_harvest.sh` does sections 2–5 in one go on a connected staging host with
+`scripts/container_harvest.sh` does sections 2–6 in one go on a connected staging host with
 Docker or Podman, inside Red Hat's UBI 9 Python 3.12 image (RHEL 9 userspace):
 
 ```bash
-podman run --rm --platform linux/amd64 \
+podman run --rm --user 0 --platform linux/amd64 \
   -v ./bundle:/bundle -v ./scripts:/scripts:ro \
   -v ./garak-offline.yaml:/cfg/garak-offline.yaml:ro -v ./out:/out \
   registry.access.redhat.com/ubi9/python-312:latest bash /scripts/container_harvest.sh
 ```
 
 It installs garak,
-starts a stand-in OpenAI-compatible endpoint, and runs the default scan once (1 generation per
-prompt) so every model, dataset and data file lands in `bundle/cache/`.
-`scripts/make_manifest.py` then writes `SHA256SUMS` and flags any pickle files.
+downloads the NLTK tagger, starts a stand-in OpenAI-compatible endpoint, and runs the default scan
+once (1 generation per prompt) so every model, dataset and data file lands in `bundle/cache/`.
+Afterwards:
+
+```bash
+rm -rf bundle/cache/huggingface/xet                       # download-only cache
+python3 -I scripts/make_manifest.py bundle bundle/MANIFEST.md bundle/SHA256SUMS
+cp requirements.in bundle/ && (cd bundle && sha256sum requirements.in >> SHA256SUMS)
+```
+
+`scripts/container_verify.sh` is the isolated test: on a network with no internet route, it checks
+`SHA256SUMS`, installs the pinned packages from local wheels (standing in for the internal package
+repository), and runs the default scan through LiteLLM using `garak-env.sh` and
+`garak-offline.yaml` exactly as shipped. `scripts/run_isolated_test.sh` sets up that network with a
+LiteLLM proxy and a mock vLLM backend, runs the test, and removes the containers afterwards.
+Results go to `out/verify/`.
+
+```bash
+ENGINE=podman LITELLM_IMG=<your LiteLLM image> scripts/run_isolated_test.sh                  # full default run
+ENGINE=podman LITELLM_IMG=<your LiteLLM image> scripts/run_isolated_test.sh --spec probes.lmrc   # a subset
+```

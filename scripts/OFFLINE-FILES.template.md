@@ -15,7 +15,8 @@ served by **vLLM behind LiteLLM** inside the isolated network, so its weights ar
 | 3 | Hugging Face datasets | 9 small datasets (package lists, system prompts) | <!-- HF_DATASET_SIZE --> | `$HF_HOME/hub/` (+ `$HF_HOME/datasets/`) |
 | 4 | WordNet (Open English WordNet 2023) | 1 lexicon, loaded into a local database | <!-- WN_SIZE --> | `$XDG_CACHE_HOME/garak/data/wn/` |
 | 5 | NLTK data | `averaged_perceptron_tagger_eng` (JSON, not pickle) | <!-- NLTK_SIZE --> | `$XDG_CACHE_HOME/garak/data/nltk_data/` |
-| 6 | Config (this folder) | `garak-offline.yaml`, `garak-env.sh`, `requirements.in` | small | anywhere, e.g. `/opt/garak/` |
+| 6 | tiktoken encoding | `cl100k_base` (plain text) | <!-- TIKTOKEN_SIZE --> | `$TIKTOKEN_CACHE_DIR` (`$GARAK_HOME/cache/tiktoken/`) |
+| 7 | Config (this folder) | `garak-offline.yaml`, `garak-env.sh`, `requirements.in`, `requirements.txt` | small | anywhere, e.g. `/opt/garak/` |
 
 No model or data file in the bundle is in pickle format. The only pickle model garak would
 normally use (`garak-llm/roberta_toxicity_classifier`, `pytorch_model.bin`) is replaced by
@@ -35,6 +36,20 @@ python3.12 -m venv /opt/garak/venv
 
 For the CPU-only torch build, add `--extra-index-url` pointing at the internal mirror of
 `https://download.pytorch.org/whl/cpu`.
+
+**Recommended: install the lock file instead.** `requirements.txt` pins all 178 packages with
+hashes, including `torch==2.14.1+cpu`. It is exactly the set that passed the isolated test.
+With only `requirements.in`, pip picks the newest versions of garak's dependencies on the day you
+install. If PyPI has a newer torch than the CPU index, pip also picks the CUDA build from PyPI,
+because `--extra-index-url` takes the highest version from any index.
+
+```bash
+/opt/garak/venv/bin/pip install --require-hashes -r requirements.txt \
+  --index-url <internal PyPI mirror> --extra-index-url <internal mirror of download.pytorch.org/whl/cpu>
+```
+
+Two packages, `ecoji==0.1.1` and `langdetect==1.0.9`, are published only as source archives.
+pip builds them during install, which needs `setuptools` from the same repository.
 
 ---
 
@@ -81,6 +96,24 @@ directory is private (for example root), not into `/tmp` or a bind mount, then c
 
 <!-- NLTK_FILES -->
 
+## 6. tiktoken encoding: `cl100k_base`
+
+Used by `divergence.RepeatedToken` through OpenAI's `tiktoken` library. Without it, tiktoken tries
+to download the file at load time, the probe fails to load, and the rest of the run continues
+without it. That was the only network access attempt in the isolated test.
+
+| Source | Goes to |
+|---|---|
+| `https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken` (SHA-256 `223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7`) | `cache/tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4`. The filename is the SHA-1 of the URL; tiktoken looks it up in `$TIKTOKEN_CACHE_DIR`, which `garak-env.sh` sets, and checks the SHA-256 before use. |
+
+```bash
+mkdir -p bundle/cache/tiktoken
+curl -fL -o bundle/cache/tiktoken/9b5ad71b2ce5302211f9c61530b329a4922fc6a4 \
+  https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken
+```
+
+<!-- TIKTOKEN_FILES -->
+
 ---
 
 ## Not downloaded (intentionally)
@@ -104,6 +137,7 @@ garak-bundle/
 ├── cache/
 │   ├── huggingface/hub/        # sections 2 and 3
 │   ├── huggingface/datasets/   # processed datasets (section 3)
+│   ├── tiktoken/               # section 6
 │   └── garak/data/
 │       ├── nltk_data/          # section 5
 │       └── wn/                 # section 4
@@ -136,7 +170,28 @@ Requirements on the isolated host:
 
 ## Pickle check
 
-<!-- PICKLE -->
+**Bundle data: no pickle.** Every file under `cache/` was checked by content (pickle header, and
+pickle entries inside zip files), not only by name. The models are safetensors, the datasets are
+TSV, JSON(L) and Arrow, the NLTK tagger is JSON, WordNet is SQLite, and the tiktoken file is text.
+
+**At runtime: nothing pickle-related is loaded.** During both isolated runs, a Python audit hook
+logged every file opened with a pickle-type extension (`.pkl .pickle .pt .pth .bin .ckpt .joblib
+.npy .npz`) and every class the `pickle` module looked up. Both logs are empty.
+
+**Inside the Python packages: pickle files are present but never loaded.** A few packages from the
+package repository ship pickle files:
+
+| Package | Files | Loaded in a default run? |
+|---|---|---|
+| `garak` 0.17.1 | `garak/data/confidence_intervals/confidence_intervals.pkl` | No. No code in 0.17.1 reads it. |
+| `garak` 0.17.1 | `garak/data/autodan/prompt_group.pth` | No. Only the live `dan.AutoDAN` attack loads it, and that probe isn't in the default set (the default uses `dan.AutoDANCached`). |
+| `joblib` 1.6.0 | 30 files under `joblib/test/data/` | No (test fixtures) |
+| `numpy` 2.5.4 | 8 files under `numpy/*/tests/data/` | No (test fixtures) |
+| `torch` 2.14.1+cpu | `torch/bin/test_interpreter_async.pt` | No (test fixture) |
+
+`setuptools`' `distutils-precedence.pth` matches by extension but is a Python path file, not a pickle.
+If policy forbids pickle files on disk at all, delete these files from the venv after installing.
+The default probe set doesn't need them.
 
 ---
 
@@ -160,7 +215,7 @@ Set `target_name` to the model name LiteLLM exposes, and `uri` to the LiteLLM ba
 
 ## Producing the bundle
 
-`scripts/container_harvest.sh` does sections 2–5 in one go on a connected staging host with
+`scripts/container_harvest.sh` does sections 2–6 in one go on a connected staging host with
 Docker or Podman, inside Red Hat's UBI 9 Python 3.12 image (RHEL 9 userspace):
 
 ```bash
@@ -182,5 +237,13 @@ cp requirements.in bundle/ && (cd bundle && sha256sum requirements.in >> SHA256S
 ```
 
 `scripts/container_verify.sh` is the isolated test: on a network with no internet route, it checks
-`SHA256SUMS`, installs from the bundle only, and runs the default scan through LiteLLM using
-`garak-env.sh` and `garak-offline.yaml` exactly as shipped.
+`SHA256SUMS`, installs the pinned packages from local wheels (standing in for the internal package
+repository), and runs the default scan through LiteLLM using `garak-env.sh` and
+`garak-offline.yaml` exactly as shipped. `scripts/run_isolated_test.sh` sets up that network with a
+LiteLLM proxy and a mock vLLM backend, runs the test, and removes the containers afterwards.
+Results go to `out/verify/`.
+
+```bash
+ENGINE=podman LITELLM_IMG=<your LiteLLM image> scripts/run_isolated_test.sh                  # full default run
+ENGINE=podman LITELLM_IMG=<your LiteLLM image> scripts/run_isolated_test.sh --spec probes.lmrc   # a subset
+```

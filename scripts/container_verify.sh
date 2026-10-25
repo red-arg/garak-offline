@@ -3,6 +3,7 @@
 # no route to the internet, only the LiteLLM proxy is reachable.
 # Installs and runs garak using only the bundle, garak-env.sh and garak-offline.yaml.
 # Run as root (--user 0) so /opt/garak is root-owned and not group/world-writable, as on the real host.
+# Optional env GARAK_EXTRA_ARGS: extra garak arguments (e.g. to run a subset of probes).
 # Mounts: /bundle (ro), /cfg (ro), /out (rw), /audit (ro, test-only pickle audit hook). Env: LITELLM_URL, LITELLM_MODEL, LITELLM_KEY
 set -euo pipefail
 
@@ -27,5 +28,5 @@ sed -e "s#https://litellm.internal.example.com/v1#$LITELLM_URL#" \
     /cfg/garak-offline.yaml > /opt/garak-verify.yaml
 
 set +e
-PYTHONPATH=/audit PICKLE_AUDIT_LOG=/out/pickle-audit.log /opt/garak/venv/bin/garak --config /opt/garak-verify.yaml --generations 1 --report_prefix verify 2>&1 | tee /out/verify-console.log
+PYTHONPATH=/audit PICKLE_AUDIT_LOG=/out/pickle-audit.log /opt/garak/venv/bin/garak --config /opt/garak-verify.yaml --generations 1 --report_prefix verify ${GARAK_EXTRA_ARGS:-} 2>&1 | tee /out/verify-console.log
 echo "garak exit: ${PIPESTATUS[0]}"
